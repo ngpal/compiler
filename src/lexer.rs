@@ -3,7 +3,7 @@ use std::{
     str::Chars,
 };
 
-use crate::error::{LexerError, LexerResult};
+use crate::error::{CompilerError, CompilerResult};
 
 // pub enum Keyword {
 //     If,
@@ -11,6 +11,7 @@ use crate::error::{LexerError, LexerResult};
 //     Loop,
 // }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum TokenKind {
     Uint(u32),
     // Float(f32),
@@ -27,10 +28,21 @@ pub enum TokenKind {
     Rparen,
 }
 
+#[derive(Debug)]
 pub struct Slice<'ip> {
     start: usize,
     len: usize,
     input: &'ip str,
+}
+
+impl<'ip> Slice<'ip> {
+    pub fn get_string(&self) -> &str {
+        if let Some(str) = self.input.get(self.start..self.start + self.len) {
+            str
+        } else {
+            "<unprintable>"
+        }
+    }
 }
 
 impl<'ip> Slice<'ip> {
@@ -39,8 +51,9 @@ impl<'ip> Slice<'ip> {
     }
 }
 
+#[derive(Debug)]
 pub struct Token<'ip> {
-    kind: TokenKind,
+    pub kind: TokenKind,
     slice: Slice<'ip>,
 }
 
@@ -89,8 +102,8 @@ impl<'ip> Lexer<'ip> {
     }
 }
 
-impl<'input> Iterator for Lexer<'input> {
-    type Item = LexerResult<Token<'input>>;
+impl<'ip> Iterator for Lexer<'ip> {
+    type Item = CompilerResult<'ip, Token<'ip>>;
     fn next(&mut self) -> Option<Self::Item> {
         let (start, cur) = self.input_iter.next()?;
         let (kind, len) = match cur {
@@ -103,7 +116,7 @@ impl<'input> Iterator for Lexer<'input> {
             ')' => (TokenKind::Rparen, 1),
             ch if ch.is_ascii_digit() => self.get_int(ch),
             ch if Self::is_ident(&ch, true) => self.get_ident(ch),
-            unknown => return Some(Err(LexerError::UnknownChar(unknown))),
+            unknown => return Some(Err(CompilerError::UnknownChar(unknown))),
         };
 
         Some(Ok(Token::new(kind, Slice::new(start, len, self.input))))
@@ -409,7 +422,7 @@ mod tests {
             if let Some(result) = lexer.next() {
                 match result {
                     Ok(_) => panic!("Expected an error for invalid input '{}'", ch),
-                    Err(LexerError::UnknownChar(error_ch)) => {
+                    Err(CompilerError::UnknownChar(error_ch)) => {
                         assert_eq!(error_ch, *ch, "Expected error for character '{}'", ch);
                     }
                     Err(_) => panic!("Expected UnknownChar error variant"),
