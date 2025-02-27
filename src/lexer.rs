@@ -63,6 +63,10 @@ impl<'ip> Lexer<'ip> {
         }
     }
 
+    fn is_ident(ch: &char, is_starting: bool) -> bool {
+        ch.is_ascii_alphabetic() || ch == &'_' || (!is_starting && ch.is_ascii_digit())
+    }
+
     fn get_int(&mut self, start_char: char) -> (TokenKind, usize) {
         let mut int = ((start_char as u8) - b'0') as u32;
         let mut len = 1;
@@ -72,6 +76,16 @@ impl<'ip> Lexer<'ip> {
         }
 
         (TokenKind::Uint(int), len)
+    }
+
+    fn get_ident(&mut self, start_char: char) -> (TokenKind, usize) {
+        let mut ident = String::from(start_char);
+        let mut len = 1;
+        while let Some((_, ch)) = self.input_iter.next_if(|(_, ch)| Self::is_ident(ch, false)) {
+            ident.push(ch);
+            len += 1;
+        }
+        (TokenKind::Identifier(ident), len)
     }
 }
 
@@ -88,6 +102,7 @@ impl<'input> Iterator for Lexer<'input> {
             '(' => (TokenKind::Lparen, 1),
             ')' => (TokenKind::Rparen, 1),
             ch if ch.is_ascii_digit() => self.get_int(ch),
+            ch if Self::is_ident(&ch, true) => self.get_ident(ch),
             unknown => return Some(Err(LexerError::UnknownChar(unknown))),
         };
 
@@ -111,6 +126,7 @@ mod tests {
             ("(", TokenKind::Lparen),
             (")", TokenKind::Rparen),
             ("42", TokenKind::Uint(42)),
+            ("foo", TokenKind::Identifier("foo".to_string())),
         ];
 
         for (input, expected_kind) in test_cases {
@@ -125,6 +141,13 @@ mod tests {
                         input
                     );
                 }
+                (TokenKind::Identifier(actual), TokenKind::Identifier(expected)) => {
+                    assert_eq!(
+                        actual, expected,
+                        "Identifier token mismatch for input '{}'",
+                        input
+                    );
+                }
                 _ => assert!(
                     matches!(token.kind, expected_kind),
                     "Token kind mismatch for input '{}'",
@@ -135,16 +158,11 @@ mod tests {
             // Check if slice is correctly created
             assert_eq!(token.slice.start, 0);
 
-            // For single-character tokens, len should be 1
-            // For multi-digit numbers, len depends on the input length
-            let expected_len = if let TokenKind::Uint(_) = expected_kind {
-                if input == "42" {
-                    2
-                } else {
-                    input.len()
-                }
-            } else {
-                1
+            // For multi-character tokens, len equals the input length
+            let expected_len = match &expected_kind {
+                TokenKind::Uint(_) => input.len(),
+                TokenKind::Identifier(_) => input.len(),
+                _ => 1,
             };
 
             assert_eq!(
@@ -159,6 +177,85 @@ mod tests {
                 "Expected end of tokens for input '{}'",
                 input
             );
+        }
+    }
+
+    #[test]
+    fn test_identifiers() {
+        let test_cases = [
+            "x",
+            "var",
+            "foo_bar",
+            "snake_case_var",
+            "camelCaseVar",
+            "PascalCaseVar",
+            "x1",
+            "num2",
+            "_underscore",
+        ];
+
+        for input in test_cases {
+            let mut lexer = Lexer::new(input);
+            let token = lexer.next().unwrap().unwrap();
+
+            if let TokenKind::Identifier(name) = &token.kind {
+                assert_eq!(
+                    name, input,
+                    "Identifier value mismatch for input '{}'",
+                    input
+                );
+            } else {
+                panic!("Expected Identifier token for input '{}'", input);
+            }
+
+            assert_eq!(token.slice.start, 0);
+            assert_eq!(token.slice.len, input.len());
+        }
+    }
+
+    #[test]
+    fn test_mixed_tokens_with_identifiers() {
+        let input = "x+foo*(bar-42);";
+        let expected = [
+            TokenKind::Identifier("x".to_string()),
+            TokenKind::Plus,
+            TokenKind::Identifier("foo".to_string()),
+            TokenKind::Star,
+            TokenKind::Lparen,
+            TokenKind::Identifier("bar".to_string()),
+            TokenKind::Minus,
+            TokenKind::Uint(42),
+            TokenKind::Rparen,
+            TokenKind::Semicolon,
+        ];
+
+        let lexer = Lexer::new(input);
+        let tokens: Vec<_> = lexer.map(Result::unwrap).collect();
+
+        assert_eq!(
+            tokens.len(),
+            expected.len(),
+            "Number of tokens doesn't match"
+        );
+
+        for (i, (token, expected_kind)) in tokens.iter().zip(expected.iter()).enumerate() {
+            match (&token.kind, expected_kind) {
+                (TokenKind::Uint(actual), TokenKind::Uint(expected)) => {
+                    assert_eq!(actual, expected, "Integer token mismatch at position {}", i);
+                }
+                (TokenKind::Identifier(actual), TokenKind::Identifier(expected)) => {
+                    assert_eq!(
+                        actual, expected,
+                        "Identifier token mismatch at position {}",
+                        i
+                    );
+                }
+                _ => assert!(
+                    matches!(&token.kind, expected_kind),
+                    "Token kind mismatch at position {}",
+                    i
+                ),
+            }
         }
     }
 
@@ -212,6 +309,13 @@ mod tests {
                 (TokenKind::Uint(actual), TokenKind::Uint(expected)) => {
                     assert_eq!(actual, expected, "Integer token mismatch at position {}", i);
                 }
+                (TokenKind::Identifier(actual), TokenKind::Identifier(expected)) => {
+                    assert_eq!(
+                        actual, expected,
+                        "Identifier token mismatch at position {}",
+                        i
+                    );
+                }
                 _ => assert!(
                     matches!(&token.kind, expected_kind),
                     "Token kind mismatch at position {}",
@@ -252,6 +356,13 @@ mod tests {
                 (TokenKind::Uint(actual), TokenKind::Uint(expected)) => {
                     assert_eq!(actual, expected, "Integer token mismatch at position {}", i);
                 }
+                (TokenKind::Identifier(actual), TokenKind::Identifier(expected)) => {
+                    assert_eq!(
+                        actual, expected,
+                        "Identifier token mismatch at position {}",
+                        i
+                    );
+                }
                 _ => assert!(
                     matches!(&token.kind, expected_kind),
                     "Token kind mismatch at position {}",
@@ -263,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_slice_positions() {
-        let input = "12+345";
+        let input = "12+foo";
         let lexer = Lexer::new(input);
         let tokens: Vec<_> = lexer.map(Result::unwrap).collect();
 
@@ -276,8 +387,8 @@ mod tests {
         assert_eq!(tokens[1].slice.start, 2); // Position of '+'
         assert_eq!(tokens[1].slice.len, 1); // Length of "+"
 
-        assert_eq!(tokens[2].slice.start, 3); // Position of '3'
-        assert_eq!(tokens[2].slice.len, 3); // Length of "345"
+        assert_eq!(tokens[2].slice.start, 3); // Position of 'f'
+        assert_eq!(tokens[2].slice.len, 3); // Length of "foo"
     }
 
     #[test]
@@ -289,19 +400,23 @@ mod tests {
 
     #[test]
     fn test_lexer_errors() {
-        let input = "abc";
-        let mut lexer = Lexer::new(input);
+        // Test for unknown characters (those that don't match any token pattern)
+        let input = "@#$";
 
-        if let Some(result) = lexer.next() {
-            match result {
-                Ok(_) => panic!("Expected an error for invalid input 'abc'"),
-                Err(LexerError::UnknownChar(ch)) => {
-                    assert_eq!(ch, 'a', "Expected error for character 'a'");
+        for (i, ch) in ['@', '#', '$'].iter().enumerate() {
+            let mut lexer = Lexer::new(&input[i..]);
+
+            if let Some(result) = lexer.next() {
+                match result {
+                    Ok(_) => panic!("Expected an error for invalid input '{}'", ch),
+                    Err(LexerError::UnknownChar(error_ch)) => {
+                        assert_eq!(error_ch, *ch, "Expected error for character '{}'", ch);
+                    }
+                    Err(_) => panic!("Expected UnknownChar error variant"),
                 }
-                Err(_) => panic!("Expected UnknownChar error variant"),
+            } else {
+                panic!("Expected an error for invalid input '{}'", ch);
             }
-        } else {
-            panic!("Expected an error for invalid input 'abc'");
         }
     }
 }
