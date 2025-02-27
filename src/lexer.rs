@@ -114,6 +114,7 @@ impl<'ip> Iterator for Lexer<'ip> {
             ';' => (TokenKind::Semicolon, 1),
             '(' => (TokenKind::Lparen, 1),
             ')' => (TokenKind::Rparen, 1),
+            ws if ws.is_whitespace() => return self.next(),
             ch if ch.is_ascii_digit() => self.get_int(ch),
             ch if Self::is_ident(&ch, true) => self.get_ident(ch),
             unknown => return Some(Err(CompilerError::UnknownChar(unknown))),
