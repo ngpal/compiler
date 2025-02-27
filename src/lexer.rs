@@ -3,6 +3,8 @@ use std::{
     str::Chars,
 };
 
+use crate::error::{LexerError, LexerResult};
+
 // pub enum Keyword {
 //     If,
 //     Let,
@@ -74,7 +76,7 @@ impl<'ip> Lexer<'ip> {
 }
 
 impl<'input> Iterator for Lexer<'input> {
-    type Item = Token<'input>;
+    type Item = LexerResult<Token<'input>>;
     fn next(&mut self) -> Option<Self::Item> {
         let (start, cur) = self.input_iter.next()?;
         let (kind, len) = match cur {
@@ -86,10 +88,10 @@ impl<'input> Iterator for Lexer<'input> {
             '(' => (TokenKind::Lparen, 1),
             ')' => (TokenKind::Rparen, 1),
             ch if ch.is_ascii_digit() => self.get_int(ch),
-            _ => unimplemented!(),
+            unknown => return Some(Err(LexerError::UnknownChar(unknown))),
         };
 
-        Some(Token::new(kind, Slice::new(start, len, self.input)))
+        Some(Ok(Token::new(kind, Slice::new(start, len, self.input))))
     }
 }
 
@@ -113,7 +115,7 @@ mod tests {
 
         for (input, expected_kind) in test_cases {
             let mut lexer = Lexer::new(input);
-            let token = lexer.next().unwrap();
+            let token = lexer.next().unwrap().unwrap();
 
             match (&token.kind, &expected_kind) {
                 (TokenKind::Uint(actual), TokenKind::Uint(expected)) => {
@@ -166,7 +168,7 @@ mod tests {
 
         for (input, expected) in test_cases {
             let mut lexer = Lexer::new(input);
-            let token = lexer.next().unwrap();
+            let token = lexer.next().unwrap().unwrap();
 
             if let TokenKind::Uint(value) = token.kind {
                 assert_eq!(
@@ -197,7 +199,7 @@ mod tests {
         ];
 
         let lexer = Lexer::new(input);
-        let tokens: Vec<_> = lexer.collect();
+        let tokens: Vec<_> = lexer.map(Result::unwrap).collect();
 
         assert_eq!(
             tokens.len(),
@@ -237,7 +239,7 @@ mod tests {
         ];
 
         let lexer = Lexer::new(input);
-        let tokens: Vec<_> = lexer.collect();
+        let tokens: Vec<_> = lexer.map(Result::unwrap).collect();
 
         assert_eq!(
             tokens.len(),
@@ -263,7 +265,7 @@ mod tests {
     fn test_slice_positions() {
         let input = "12+345";
         let lexer = Lexer::new(input);
-        let tokens: Vec<_> = lexer.collect();
+        let tokens: Vec<_> = lexer.map(Result::unwrap).collect();
 
         assert_eq!(tokens.len(), 3);
 
@@ -281,16 +283,25 @@ mod tests {
     #[test]
     fn test_empty_input() {
         let lexer = Lexer::new("");
-        let tokens: Vec<_> = lexer.collect();
+        let tokens: Vec<_> = lexer.collect::<Result<Vec<_>, _>>().unwrap();
         assert!(tokens.is_empty(), "Empty input should produce no tokens");
     }
 
-    // This test will fail with the current implementation since we're using unimplemented!()
-    // for identifiers and other non-implemented token types
     #[test]
-    #[should_panic(expected = "not implemented")]
-    fn test_unimplemented_tokens() {
-        let mut lexer = Lexer::new("abc");
-        lexer.next();
+    fn test_lexer_errors() {
+        let input = "abc";
+        let mut lexer = Lexer::new(input);
+
+        if let Some(result) = lexer.next() {
+            match result {
+                Ok(_) => panic!("Expected an error for invalid input 'abc'"),
+                Err(LexerError::UnknownChar(ch)) => {
+                    assert_eq!(ch, 'a', "Expected error for character 'a'");
+                }
+                Err(_) => panic!("Expected UnknownChar error variant"),
+            }
+        } else {
+            panic!("Expected an error for invalid input 'abc'");
+        }
     }
 }
